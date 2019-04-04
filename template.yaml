@@ -128,9 +128,9 @@ Resources:
       Policies:
         - AWSXrayWriteOnlyAccess
         - S3CrudPolicy:
-            BucketName: !Ref VideoFiles
+            BucketName: !Sub ${AWS::StackName}-VideoFiles
         - S3CrudPolicy:
-            BucketName: !Ref Thumbnails
+            BucketName: !Sub ${AWS::StackName}-Thumbnails
         - Statement:
             - Effect: Allow
               Action:
@@ -152,11 +152,11 @@ Resources:
           DOCKER_TASK_SUBNETS: !Join
             - ','
             - !Ref DefaultVPCSubnets
-          BUCKET_NAME: !Sub ${AWS::StackName}-thumbnails
-          BUCKET_NAME_2: !Sub ${AWS::StackName}-videofiles
-          BUCKET_NAME_3: !Ref VideoFiles
+          BUCKET_NAME: !Sub ${AWS::StackName}-Thumbnails
+          BUCKET_NAME_2: !Sub ${AWS::StackName}-VideoFiles
+          BUCKET_NAME_3: !Sub ${AWS::StackName}-VideoFiles
           BUCKET_ARN: !GetAtt VideoFiles.Arn
-          BUCKET_NAME_4: !Ref Thumbnails
+          BUCKET_NAME_4: !Sub ${AWS::StackName}-Thumbnails
           BUCKET_ARN_2: !GetAtt Thumbnails.Arn
           DOCKER_TASK_ARN: !Ref VideoToThumb
           DOCKER_TASK_SUBNETS_2: !Join
