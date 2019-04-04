@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  VideoToThumb:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Image: rupakg/docker-ffmpeg-thumb:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref VideoToThumbLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: rupakg-docker-ffmpeg-thumb
+          Name: video-to-thumb-container
+          Environment:
+            - Name: AWS_REGION
+              Value: us-west-2
+            - Name: INPUT_VIDEO_FILE_URL
+              Value: https://s3.amazonaws.com/your-s3-bucket-name/test.mp4
+            - Name: OUTPUT_S3_PATH
+              Value: your-s3-bucket-name/your-thumbnail-folder-name
+            - Name: OUTPUT_THUMBS_FILE_NAME
+              Value: test.png
+            - Name: POSITION_TIME_DURATION
+              Value: 00:01
+            - Name: BUCKET_NAME
+              Value: !Ref Thumbnails
+            - Name: BUCKET_ARN
+              Value: !GetAtt Thumbnails.Arn
+            - Name: BUCKET_NAME_2
+              Value: !Ref VideoFiles
+            - Name: BUCKET_ARN_2
+              Value: !GetAtt VideoFiles.Arn
+      Cpu: 1024
+      ExecutionRoleArn: !GetAtt VideoToThumbExecutionRole.Arn
+      Memory: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !GetAtt VideoToThumbTaskRole.Arn
+      Volumes: []
+    DependsOn: VideoToThumbLogGroup
+    Metadata:
+      StackeryName: stackery-video-to-thumb-task-def
+  VideoToThumbExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-VideoToThumb-execution
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DownloadDockerImagesFromECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:*:*:log-group:/stackery/task/${AWS::StackName}-*
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+  VideoToThumbTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-VideoToThumb-task
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AccessThumbnails
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutLifecycleConfiguration
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${Thumbnails}
+                  - !Sub arn:${AWS::Partition}:s3:::${Thumbnails}/*
+        - PolicyName: AccessVideoFiles
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutLifecycleConfiguration
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${VideoFiles}
+                  - !Sub arn:${AWS::Partition}:s3:::${VideoFiles}/*
+  VideoToThumbLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /stackery/task/${AWS::StackName}-VideoToThumb/rupakg-docker-ffmpeg-thumb
+  VideoFiles:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-videofiles
+    Metadata:
+      StackeryName: rg-stackery-video-files
+  Thumbnails:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-thumbnails
+    Metadata:
+      StackeryName: rg-stackery-thumbnails
+  onUploadVideoStackery:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-onUploadVideoStackery
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: triggerOnUploadVideoStackery
+      CodeUri: src/onUploadVideoStackery
+      Handler: index.handler
+      Runtime: nodejs8.10
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ecs:RunTask
+                - ecs:DescribeTasks
+                - ecs:StopTask
+              Resource:
+                - !Ref VideoToThumb
+                - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/*
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource:
+                - !GetAtt VideoToThumbExecutionRole.Arn
+                - !GetAtt VideoToThumbTaskRole.Arn
+        - S3CrudPolicy:
+            BucketName: !Sub ${AWS::StackName}-thumbnails
+        - S3CrudPolicy:
+            BucketName: !Sub ${AWS::StackName}-videofiles
+      Events:
+        VideoFiles:
+          Type: S3
+          Properties:
+            Bucket: !Ref VideoFiles
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
+      Environment:
+        Variables:
+          DOCKER_TASK_ARN: !Ref VideoToThumb
+          DOCKER_TASK_SUBNETS: !Join
+            - ','
+            - !Ref DefaultVPCSubnets
+          BUCKET_NAME: !Sub ${AWS::StackName}-thumbnails
+          BUCKET_NAME_2: !Sub ${AWS::StackName}-videofiles
+    Metadata:
+      StackeryName: triggerOnUploadVideoStackery
+  onThumbnailCreationStackery:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-onThumbnailCreationStac
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: triggerOnThumbnailCreationStackery
+      CodeUri: src/onThumbnailCreationStackery
+      Handler: index.handler
+      Runtime: nodejs8.10
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+      Events:
+        Thumbnails:
+          Type: S3
+          Properties:
+            Bucket: !Ref Thumbnails
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
+    Metadata:
+      StackeryName: triggerOnThumbnailCreationStackery
+Parameters:
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+  DefaultVPCSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: AWS account-specific default VPC subnets (injected by Stackery at deployment time)
