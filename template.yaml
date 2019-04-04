@@ -28,10 +28,6 @@ Resources:
               Value: !Ref Thumbnails
             - Name: BUCKET_ARN
               Value: !GetAtt Thumbnails.Arn
-            - Name: BUCKET_NAME_2
-              Value: !Ref VideoFiles
-            - Name: BUCKET_ARN_2
-              Value: !GetAtt VideoFiles.Arn
       Cpu: 1024
       ExecutionRoleArn: !GetAtt VideoToThumbExecutionRole.Arn
       Memory: 2048
@@ -100,23 +96,6 @@ Resources:
                 Resource:
                   - !Sub arn:${AWS::Partition}:s3:::${Thumbnails}
                   - !Sub arn:${AWS::Partition}:s3:::${Thumbnails}/*
-        - PolicyName: AccessVideoFiles
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:GetBucketLocation
-                  - s3:GetObjectVersion
-                  - s3:PutObject
-                  - s3:PutObjectAcl
-                  - s3:GetLifecycleConfiguration
-                  - s3:PutLifecycleConfiguration
-                Resource:
-                  - !Sub arn:${AWS::Partition}:s3:::${VideoFiles}
-                  - !Sub arn:${AWS::Partition}:s3:::${VideoFiles}/*
   VideoToThumbLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -148,6 +127,10 @@ Resources:
       Tracing: Active
       Policies:
         - AWSXrayWriteOnlyAccess
+        - S3CrudPolicy:
+            BucketName: !Ref VideoFiles
+        - S3CrudPolicy:
+            BucketName: !Ref Thumbnails
         - Statement:
             - Effect: Allow
               Action:
@@ -164,10 +147,21 @@ Resources:
               Resource:
                 - !GetAtt VideoToThumbExecutionRole.Arn
                 - !GetAtt VideoToThumbTaskRole.Arn
-        - S3CrudPolicy:
-            BucketName: !Sub ${AWS::StackName}-thumbnails
-        - S3CrudPolicy:
-            BucketName: !Sub ${AWS::StackName}-videofiles
+      Environment:
+        Variables:
+          DOCKER_TASK_SUBNETS: !Join
+            - ','
+            - !Ref DefaultVPCSubnets
+          BUCKET_NAME: !Sub ${AWS::StackName}-thumbnails
+          BUCKET_NAME_2: !Sub ${AWS::StackName}-videofiles
+          BUCKET_NAME_3: !Ref VideoFiles
+          BUCKET_ARN: !GetAtt VideoFiles.Arn
+          BUCKET_NAME_4: !Ref Thumbnails
+          BUCKET_ARN_2: !GetAtt Thumbnails.Arn
+          DOCKER_TASK_ARN: !Ref VideoToThumb
+          DOCKER_TASK_SUBNETS_2: !Join
+            - ','
+            - !Ref DefaultVPCSubnets
       Events:
         VideoFiles:
           Type: S3
@@ -176,14 +170,6 @@ Resources:
             Events:
               - s3:ObjectCreated:*
               - s3:ObjectRemoved:*
-      Environment:
-        Variables:
-          DOCKER_TASK_ARN: !Ref VideoToThumb
-          DOCKER_TASK_SUBNETS: !Join
-            - ','
-            - !Ref DefaultVPCSubnets
-          BUCKET_NAME: !Sub ${AWS::StackName}-thumbnails
-          BUCKET_NAME_2: !Sub ${AWS::StackName}-videofiles
     Metadata:
       StackeryName: triggerOnUploadVideoStackery
   onThumbnailCreationStackery:
